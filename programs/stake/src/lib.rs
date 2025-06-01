@@ -1,9 +1,26 @@
 use anchor_lang::prelude::*;
-
+use anchor_lang::system_program;
 declare_id!("EFJQgNqJMtZCBhHtsAhYm9zkj5nCozrsTsM6GZdo7uG9");
+const POINTS: u64 = 1_000_000;
+const LAMPORTS: u64 = 1_000_000;
+const SECONDS: u64 = 86_400;
+
+#[error_code]
+pub enum StakeError {
+    #[msg("Invalid amount")]
+    InvalidAmount,
+    #[msg("Invalid timestamp")]
+    InvalidTimestamp,
+    #[msg("Unauthorized")]
+    Unauthorized,
+    #[msg("Overflow occurred")]
+    Overflow,
+}
 
 #[program]
 pub mod stake {
+ 
+
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -18,6 +35,49 @@ pub mod stake {
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
+
+    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        require!(amount > 0, StakeError::InvalidAmount);
+        let clock = Clock::get()?;
+      let cpi_context=CpiContext::new(ctx.accounts.system_program.to_account_info(),system_program::Transfer{
+        from:ctx.accounts.signer.to_account_info(),
+        to:ctx.accounts.pda.to_account_info()
+      });
+      system_program::transfer(cpi_context,amount)?;
+      
+      let pda_account = &mut ctx.accounts.pda;
+  pda_account.staked_amount=pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
+      update_point(pda_account, clock.epoch as i64)?;
+        pda_account.staked_amount = pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
+        
+        Ok(())
+    }
+}
+
+
+fn update_point(pda_account: &mut StakeAccount, current_time: i64) -> Result<()> {
+    let time = current_time
+        .checked_sub(pda_account.last_update_amount)
+        .ok_or(StakeError::InvalidTimestamp)? as u64;
+    if time > 0 && pda_account.staked_amount > 0 {
+        let new_points = calculate_point_earned(pda_account.staked_amount, time)?;
+        pda_account.point = pda_account.point.checked_add(new_points).ok_or(StakeError::Overflow)?;
+    }
+    pda_account.last_update_amount = current_time;
+    Ok(())
+}
+
+fn calculate_point_earned(staked: u64, time: u64) -> Result<u64> {
+    let points = (staked as u128)
+        .checked_mul(time as u128)
+        .ok_or(StakeError::Overflow)?
+        .checked_mul(POINTS as u128)
+        .ok_or(StakeError::Overflow)?
+        .checked_div(LAMPORTS as u128)
+        .ok_or(StakeError::Overflow)?
+        .checked_div(SECONDS as u128)
+        .ok_or(StakeError::Overflow)?;
+    Ok(points as u64)
 }
 
 #[account]
@@ -48,8 +108,9 @@ pub struct Initialize<'info> {
 pub struct Stake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
-    #[account(mut)]
-    pub pda: Account<'info, StakeAccount>
+    #[account(mut,seeds=[b"client1",signer.key().as_ref()],bump=pda.bump,constraint = pda.owner == signer.key() @ StakeError::Unauthorized)]
+    pub pda: Account<'info, StakeAccount>,
+    pub system_program:Program<'info,System>
 }
 
 #[account]
