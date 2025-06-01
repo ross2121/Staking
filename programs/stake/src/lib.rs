@@ -21,6 +21,8 @@ pub enum StakeError {
 pub mod stake {
  
 
+    use anchor_lang::solana_program::{clock, native_token::LAMPORTS_PER_SOL};
+
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -35,6 +37,20 @@ pub mod stake {
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
+    pub fn unstake(ctx: Context<Unstake>,amount: u64)-> Result<()>{
+        require!(amount>0,StakeError::InvalidAmount);
+        require!(ctx.accounts.pda.staked_amount>=amount,StakeError::InvalidAmount);
+        let clock=Clock::get()?;
+        let bump=ctx.accounts.pda.bump;
+        let signer_key=ctx.accounts.signer.key();
+        update_point(&mut ctx.accounts.pda,clock.unix_timestamp)?;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"client1", signer_key.as_ref(), &[bump]]];
+        let cpi_Context=CpiContext::new_with_signer(ctx.accounts.system_program.to_account_info(), system_program::Transfer{from:ctx.accounts.pda.to_account_info(),to:ctx.accounts.signer.to_account_info()}, signer_seeds);
+        system_program::transfer(cpi_Context,amount)?;
+        ctx.accounts.pda.staked_amount=ctx.accounts.pda.staked_amount.checked_sub(amount).ok_or(StakeError::Unauthorized)?;
+          
+        Ok(())
+    }
 
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         require!(amount > 0, StakeError::InvalidAmount);
@@ -43,9 +59,10 @@ pub mod stake {
         from:ctx.accounts.signer.to_account_info(),
         to:ctx.accounts.pda.to_account_info()
       });
-      system_program::transfer(cpi_context,amount)?;
+      system_program::transfer(cpi_context,amount*LAMPORTS_PER_SOL)?;
       
       let pda_account = &mut ctx.accounts.pda;
+
   pda_account.staked_amount=pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
       update_point(pda_account, clock.epoch as i64)?;
         pda_account.staked_amount = pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
@@ -110,6 +127,14 @@ pub struct Stake<'info> {
     pub signer: Signer<'info>,
     #[account(mut,seeds=[b"client1",signer.key().as_ref()],bump=pda.bump,constraint = pda.owner == signer.key() @ StakeError::Unauthorized)]
     pub pda: Account<'info, StakeAccount>,
+    pub system_program:Program<'info,System>
+}
+#[derive(Accounts)]
+pub struct Unstake<'info> {
+    #[account(mut)]
+    pub signer:Signer<'info>,
+    #[account(mut,seeds=[b"client1",signer.key.as_ref()],bump=pda.bump,constraint=pda.owner==signer.key()@StakeError::Unauthorized)]
+    pub  pda:Account<'info,StakeAccount>,
     pub system_program:Program<'info,System>
 }
 
