@@ -21,7 +21,7 @@ pub enum StakeError {
 pub mod stake {
  
 
-    use anchor_lang::solana_program::{clock, native_token::LAMPORTS_PER_SOL};
+    use anchor_lang::solana_program::{ clock, native_token::LAMPORTS_PER_SOL};
 
     use super::*;
 
@@ -37,17 +37,34 @@ pub mod stake {
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
-    pub fn unstake(ctx: Context<Unstake>,amount: u64)-> Result<()>{
-        require!(amount>0,StakeError::InvalidAmount);
-        require!(ctx.accounts.pda.staked_amount>=amount,StakeError::InvalidAmount);
-        let clock=Clock::get()?;
-        let bump=ctx.accounts.pda.bump;
-        let signer_key=ctx.accounts.signer.key();
-        update_point(&mut ctx.accounts.pda,clock.unix_timestamp)?;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"client1", signer_key.as_ref(), &[bump]]];
-        let cpi_Context=CpiContext::new_with_signer(ctx.accounts.system_program.to_account_info(), system_program::Transfer{from:ctx.accounts.pda.to_account_info(),to:ctx.accounts.signer.to_account_info()}, signer_seeds);
-        system_program::transfer(cpi_Context,amount)?;
-        ctx.accounts.pda.staked_amount=ctx.accounts.pda.staked_amount.checked_sub(amount).ok_or(StakeError::Unauthorized)?;
+    pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
+        require!(amount > 0, StakeError::InvalidAmount);
+        require!(ctx.accounts.pda.staked_amount >= amount, StakeError::InvalidAmount);
+
+        let clock = Clock::get()?;
+        let bump = ctx.accounts.pda.bump;
+        let signer_key = ctx.accounts.signer.key();
+        
+        // Update points first
+        update_point(&mut ctx.accounts.pda, clock.unix_timestamp)?;
+        
+        // Create signer seeds for the vault PDA
+        let vault_seeds: &[&[&[u8]]] = &[&[b"vault", signer_key.as_ref(), &[ctx.bumps.vault]]];
+        
+        // Transfer tokens from the vault PDA
+        let cpi_context = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.signer.to_account_info()
+            },
+            vault_seeds
+        );
+        system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
+    
+        ctx.accounts.pda.staked_amount = ctx.accounts.pda.staked_amount
+            .checked_sub(amount)
+            .ok_or(StakeError::Unauthorized)?;
           
         Ok(())
     }
@@ -55,27 +72,53 @@ pub mod stake {
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         require!(amount > 0, StakeError::InvalidAmount);
         let clock = Clock::get()?;
-      let cpi_context=CpiContext::new(ctx.accounts.system_program.to_account_info(),system_program::Transfer{
-        from:ctx.accounts.signer.to_account_info(),
-        to:ctx.accounts.pda.to_account_info()
-      });
-      system_program::transfer(cpi_context,amount*LAMPORTS_PER_SOL)?;
-      
-      let pda_account = &mut ctx.accounts.pda;
-
-  pda_account.staked_amount=pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
-      update_point(pda_account, clock.epoch as i64)?;
+        let vault_seeds: &[&[&[u8]]] = &[&[b"vault", ctx.accounts.signer.key().as_ref(), &[ctx.bumps.vault]]];
+        
+        // Transfer tokens to the vault PDA
+        let cpi_context = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.signer.to_account_info(),
+                to: ctx.accounts.vault.to_account_info()
+            },
+            &[]
+        );
+        system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
+        
+        let pda_account = &mut ctx.accounts.pda;
         pda_account.staked_amount = pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
         
         Ok(())
     }
+pub fn claim_points(ctx: Context<ClaimPoints>) -> Result<()> {
+    let pda = &mut ctx.accounts.pda_account;
+    let clock = Clock::get()?;
+    update_point(pda, clock.unix_timestamp)?;
+    let claimable_points = pda.point / 1_000_000;
+    msg!("User has {} claimable points", claimable_points);
+    pda.point = 0;
+    Ok(())
+}
+pub fn get_points(ctx:Context<GetPoints>)-> Result<()>{
+let pda_account=&mut ctx.accounts.pda_account;
+let clock=Clock::get()?;
+let time_elapsed=clock.unix_timestamp.checked_sub(pda_account.last_update_amount).ok_or(StakeError::Overflow)?;
+let new_points=calculate_point_earned(pda_account.staked_amount, time_elapsed)?;
+let current_total_points=pda_account.point.checked_add(new_points).ok_or(StakeError::Overflow)?;
+msg!("Current points: {}, Staked amount: {} SOL", 
+current_total_points / 1_000_000, 
+pda_account.staked_amount / LAMPORTS_PER_SOL);
+
+    Ok(())
+}
+    // pub fn clains_points(ctx:Context<>)
 }
 
 
 fn update_point(pda_account: &mut StakeAccount, current_time: i64) -> Result<()> {
     let time = current_time
         .checked_sub(pda_account.last_update_amount)
-        .ok_or(StakeError::InvalidTimestamp)? as u64;
+        .ok_or(StakeError::InvalidTimestamp)?;
     if time > 0 && pda_account.staked_amount > 0 {
         let new_points = calculate_point_earned(pda_account.staked_amount, time)?;
         pda_account.point = pda_account.point.checked_add(new_points).ok_or(StakeError::Overflow)?;
@@ -84,7 +127,7 @@ fn update_point(pda_account: &mut StakeAccount, current_time: i64) -> Result<()>
     Ok(())
 }
 
-fn calculate_point_earned(staked: u64, time: u64) -> Result<u64> {
+fn calculate_point_earned(staked: u64, time: i64) -> Result<u64> {
     let points = (staked as u128)
         .checked_mul(time as u128)
         .ok_or(StakeError::Overflow)?
@@ -113,7 +156,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 8 + 8 + 32 + 1 + 8, // discriminator + point + staked_amount + owner + bump + last_update_amount
+        space = 8 + 8 + 8 + 32 + 1 + 8, 
         seeds = [b"client1", signer.key().as_ref()],
         bump
     )]
@@ -125,19 +168,43 @@ pub struct Initialize<'info> {
 pub struct Stake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
-    #[account(mut,seeds=[b"client1",signer.key().as_ref()],bump=pda.bump,constraint = pda.owner == signer.key() @ StakeError::Unauthorized)]
+    #[account(mut, seeds=[b"client1", signer.key().as_ref()], bump=pda.bump, constraint = pda.owner == signer.key() @ StakeError::Unauthorized)]
     pub pda: Account<'info, StakeAccount>,
-    pub system_program:Program<'info,System>
+    #[account(mut, seeds=[b"vault", signer.key().as_ref()], bump)]
+    pub vault: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
+
 #[derive(Accounts)]
 pub struct Unstake<'info> {
     #[account(mut)]
-    pub signer:Signer<'info>,
-    #[account(mut,seeds=[b"client1",signer.key.as_ref()],bump=pda.bump,constraint=pda.owner==signer.key()@StakeError::Unauthorized)]
-    pub  pda:Account<'info,StakeAccount>,
-    pub system_program:Program<'info,System>
+    pub signer: Signer<'info>,
+    #[account(mut, seeds=[b"client1", signer.key().as_ref()], bump=pda.bump, constraint=pda.owner==signer.key() @ StakeError::Unauthorized)]
+    pub pda: Account<'info, StakeAccount>,
+    #[account(mut, seeds=[b"vault", signer.key().as_ref()], bump)]
+    pub vault: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
-
+#[derive(Accounts)]
+pub struct ClaimPoints<'info>{
+    #[account(mut)]
+    pub user:Signer<'info>,
+    #[account(mut,seeds=[b"client1",user.key().as_ref()],
+     bump=pda_account.bump,
+     constraint=pda_account.owner==user.key() @StakeError::Unauthorized
+     )]
+     pub pda_account:Account<'info,StakeAccount>
+}
+#[derive(Accounts)]
+pub struct GetPoints<'info>{
+    #[account(mut)]
+    pub user:Signer<'info>,
+    #[account(mut,seeds=[b"client1",user.key().as_ref()],
+     bump=pda_account.bump,
+     constraint=pda_account.owner==user.key() @StakeError::Unauthorized
+     )]
+     pub pda_account:Account<'info,StakeAccount>
+}
 #[account]
 pub struct NewAccount {
     pub data: u32,
