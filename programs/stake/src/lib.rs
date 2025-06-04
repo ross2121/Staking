@@ -33,35 +33,33 @@ pub mod stake {
         pda_account.point = 0;
         pda_account.staked_amount = 0;
         pda_account.last_update_amount = clock.epoch as i64;
-
+        // let cpi_context = CpiContext::new(
+        //     ctx.accounts.system_program.to_account_info(),
+        //     system_program::Transfer {
+        //         from: ctx.accounts.signer.to_account_info(),
+        //         to: ctx.accounts.vault.to_account_info()
+        //     }
+        // );
+        // system_program::transfer(cpi_context, 1 * LAMPORTS_PER_SOL)?;
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
     pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         require!(amount > 0, StakeError::InvalidAmount);
         require!(ctx.accounts.pda.staked_amount >= amount, StakeError::InvalidAmount);
-
         let clock = Clock::get()?;
-        let bump = ctx.accounts.pda.bump;
-        let signer_key = ctx.accounts.signer.key();
-        
-        // Update points first
         update_point(&mut ctx.accounts.pda, clock.unix_timestamp)?;
-        
-        // Create signer seeds for the vault PDA
-        let vault_seeds: &[&[&[u8]]] = &[&[b"vault", signer_key.as_ref(), &[ctx.bumps.vault]]];
-        
-        // Transfer tokens from the vault PDA
-        let cpi_context = CpiContext::new_with_signer(
+        let signer_key = ctx.accounts.signer.key();
+        let vault_seeds = &[b"vault", signer_key.as_ref(), &[ctx.bumps.vault]];
+        let signer_seeds = &[&vault_seeds[..]];
+        let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.vault.to_account_info(),
                 to: ctx.accounts.signer.to_account_info()
-            },
-            vault_seeds
-        );
+            }
+        ).with_signer(signer_seeds);
         system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
-    
         ctx.accounts.pda.staked_amount = ctx.accounts.pda.staked_amount
             .checked_sub(amount)
             .ok_or(StakeError::Unauthorized)?;
@@ -72,16 +70,12 @@ pub mod stake {
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         require!(amount > 0, StakeError::InvalidAmount);
         let clock = Clock::get()?;
-        let vault_seeds: &[&[&[u8]]] = &[&[b"vault", ctx.accounts.signer.key().as_ref(), &[ctx.bumps.vault]]];
-        
-        // Transfer tokens to the vault PDA
-        let cpi_context = CpiContext::new_with_signer(
+        let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.signer.to_account_info(),
                 to: ctx.accounts.vault.to_account_info()
-            },
-            &[]
+            }
         );
         system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
         
@@ -124,6 +118,8 @@ fn update_point(pda_account: &mut StakeAccount, current_time: i64) -> Result<()>
         pda_account.point = pda_account.point.checked_add(new_points).ok_or(StakeError::Overflow)?;
     }
     pda_account.last_update_amount = current_time;
+    pda_account.last_update_amount=current_time; 
+    dbg!("ds");
     Ok(())
 }
 
@@ -148,6 +144,11 @@ pub struct StakeAccount {
     pub bump: u8,
     pub last_update_amount: i64
 }
+pub struct aultAccount {
+   
+    pub staked_amount: u64,
+ 
+}
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
@@ -156,11 +157,18 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = signer,
-        space = 8 + 8 + 8 + 32 + 1 + 8, 
+        space = 8 + 8 + 8 + 32 + 1 + 8,
         seeds = [b"client1", signer.key().as_ref()],
         bump
     )]
     pub pda: Account<'info, StakeAccount>,
+    /// CHECK: This is a PDA that holds the SOL
+    #[account(
+        mut,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump
+    )]
+    pub vault: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -168,23 +176,44 @@ pub struct Initialize<'info> {
 pub struct Stake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
-    #[account(mut, seeds=[b"client1", signer.key().as_ref()], bump=pda.bump, constraint = pda.owner == signer.key() @ StakeError::Unauthorized)]
+    #[account(
+        mut,
+        seeds=[b"client1", signer.key().as_ref()],
+        bump=pda.bump,
+        constraint = pda.owner == signer.key() @ StakeError::Unauthorized
+    )]
     pub pda: Account<'info, StakeAccount>,
-    #[account(mut, seeds=[b"vault", signer.key().as_ref()], bump)]
-    pub vault: UncheckedAccount<'info>,
+    /// CHECK: This is a PDA that holds the SOL
+    #[account(
+        mut,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump
+    )]
+    pub vault: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
+
 
 #[derive(Accounts)]
 pub struct Unstake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
-    #[account(mut, seeds=[b"client1", signer.key().as_ref()], bump=pda.bump, constraint=pda.owner==signer.key() @ StakeError::Unauthorized)]
+    #[account(
+        mut,
+        seeds=[b"client1", signer.key().as_ref()], 
+        bump=pda.bump,
+    )]
     pub pda: Account<'info, StakeAccount>,
-    #[account(mut, seeds=[b"vault", signer.key().as_ref()], bump)]
-    pub vault: UncheckedAccount<'info>,
+    /// CHECK: This is a PDA that holds the SOL
+    #[account(
+        mut,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump
+    )]
+    pub vault: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
+
 #[derive(Accounts)]
 pub struct ClaimPoints<'info>{
     #[account(mut)]
@@ -195,6 +224,7 @@ pub struct ClaimPoints<'info>{
      )]
      pub pda_account:Account<'info,StakeAccount>
 }
+
 #[derive(Accounts)]
 pub struct GetPoints<'info>{
     #[account(mut)]
@@ -205,7 +235,11 @@ pub struct GetPoints<'info>{
      )]
      pub pda_account:Account<'info,StakeAccount>
 }
+
 #[account]
 pub struct NewAccount {
     pub data: u32,
 }
+// pub struct Amount{
+
+// }
