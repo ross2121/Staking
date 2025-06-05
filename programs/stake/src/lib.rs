@@ -1,5 +1,19 @@
-use anchor_lang::prelude::*;
+
+
 use anchor_lang::system_program;
+
+use {
+    anchor_lang::prelude::*,
+    anchor_spl::{
+        metadata::{
+            create_metadata_accounts_v3, mpl_token_metadata::types::DataV2,
+            CreateMetadataAccountsV3,Metadata
+        },
+        token::{Mint, Token},
+    },
+};
+
+// use crate::instruction::TokenProgram;
 declare_id!("EFJQgNqJMtZCBhHtsAhYm9zkj5nCozrsTsM6GZdo7uG9");
 const POINTS: u64 = 1_000_000;
 const LAMPORTS: u64 = 1_000_000;
@@ -44,6 +58,45 @@ pub mod stake {
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
+    pub fn create_token_mint(
+        ctx: Context<CreateToken>,
+        _token_decimal: u8,
+        token_name: String,
+        token_symbol: String,
+        token_uri: String
+    ) -> Result<()> {
+        msg!("Creating metadata for mint: {}", ctx.accounts.mint_account.key());
+        msg!("Metadata account: {}", ctx.accounts.metadata_account.key());
+        
+        create_metadata_accounts_v3(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                CreateMetadataAccountsV3 {
+                    metadata: ctx.accounts.metadata_account.to_account_info(),
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    mint_authority: ctx.accounts.payer.to_account_info(),
+                    update_authority: ctx.accounts.payer.to_account_info(),
+                    payer: ctx.accounts.payer.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+            ),
+            DataV2 {
+                name: token_name,
+                symbol: token_symbol,
+                uri: token_uri,
+                seller_fee_basis_points: 0,
+                creators: None,
+                collection: None,
+                uses: None,
+            },
+            false, // is_mutable
+            true,  // update_authority_is_signer
+            None,  // collection
+        )?;
+        
+        Ok(())
+    }
     pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         require!(amount > 0, StakeError::InvalidAmount);
         require!(ctx.accounts.pda.staked_amount >= amount, StakeError::InvalidAmount);
@@ -54,7 +107,7 @@ pub mod stake {
         let signer_seeds = &[&vault_seeds[..]];
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
+            system_program::Transfer {  
                 from: ctx.accounts.vault.to_account_info(),
                 to: ctx.accounts.signer.to_account_info()
             }
@@ -93,6 +146,7 @@ pub fn claim_points(ctx: Context<ClaimPoints>) -> Result<()> {
     pda.point = 0;
     Ok(())
 }
+
 pub fn get_points(ctx:Context<GetPoints>)-> Result<()>{
 let pda_account=&mut ctx.accounts.pda_account;
 let clock=Clock::get()?;
@@ -144,6 +198,12 @@ pub struct StakeAccount {
     pub bump: u8,
     pub last_update_amount: i64
 }
+pub struct  Createmint{
+ pub name:String,
+ pub url:String,
+ pub symbol:String
+}
+
 pub struct aultAccount {
    
     pub staked_amount: u64,
@@ -235,7 +295,25 @@ pub struct GetPoints<'info>{
      )]
      pub pda_account:Account<'info,StakeAccount>
 }
+#[derive(Accounts)]
+#[instruction(_token_decimals: u8,token_name:String,token_symbol:String,token_uri:String)]
+pub struct CreateToken<'info>{
+#[account(mut)]
+pub payer:Signer<'info>,
 
+    /// CHECK: Validate address by deriving pda
+#[account(mut,seeds=[b"metadata",token_metadata.key().as_ref(),mint_account.key().as_ref()],bump,seeds::program=token_metadata.key())]
+pub metadata_account:UncheckedAccount<'info>,
+#[account(init,payer=payer,mint::decimals=_token_decimals,mint::authority=payer.key())]
+pub mint_account:Account<'info,Mint>,
+pub token_metadata:Program<'info,Metadata>,
+pub token_program:Program<'info,Token>,
+pub system_program:Program<'info,System>,
+pub rent:Sysvar<'info,Rent>
+
+
+
+} 
 #[account]
 pub struct NewAccount {
     pub data: u32,
