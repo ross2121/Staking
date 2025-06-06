@@ -35,6 +35,7 @@ pub mod stake {
  
 
     use anchor_lang::solana_program::{ clock, native_token::LAMPORTS_PER_SOL};
+    use anchor_spl::token::{self, Burn};
 
     use super::*;
 
@@ -112,6 +113,18 @@ pub mod stake {
             }
         ).with_signer(signer_seeds);
         system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
+
+        // Burn tokens from the associated token account
+        let burn_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint: ctx.accounts.mint_account.to_account_info(),
+                from: ctx.accounts.associated_token_account.to_account_info(),
+                authority: ctx.accounts.signer.to_account_info(),
+            }
+        );
+        token::burn(burn_ctx, amount * 10u64.pow(ctx.accounts.mint_account.decimals as u32))?;
+
         ctx.accounts.pda.staked_amount = ctx.accounts.pda.staked_amount
             .checked_sub(amount)
             .ok_or(StakeError::Unauthorized)?;
@@ -307,12 +320,26 @@ pub struct Stake<'info> {
 pub struct Unstake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
     #[account(
         mut,
         seeds=[b"client1", signer.key().as_ref()], 
         bump=pda.bump,
     )]
     pub pda: Account<'info, StakeAccount>,
+    #[account(mut)]
+    pub mint_account: Account<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = mint_account,
+        associated_token::authority = signer
+    )]
+    pub associated_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    
     /// CHECK: This is a PDA that holds the SOL
     #[account(
         mut,
