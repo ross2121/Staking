@@ -1,6 +1,5 @@
-
-
 use anchor_lang::system_program;
+use anchor_spl::{associated_token::AssociatedToken, token::{MintTo, TokenAccount}};
 
 use {
     anchor_lang::prelude::*,
@@ -9,7 +8,7 @@ use {
             create_metadata_accounts_v3, mpl_token_metadata::types::DataV2,
             CreateMetadataAccountsV3,Metadata
         },
-        token::{Mint, Token},
+        token::{Mint, Token, mint_to},
     },
 };
 
@@ -117,6 +116,20 @@ pub mod stake {
             .checked_sub(amount)
             .ok_or(StakeError::Unauthorized)?;
           
+        Ok(())
+    }
+    pub fn mint_token(ctx: Context<Minttoken>, amount: u64) -> Result<()> {
+        mint_to(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    to: ctx.accounts.associated_token_account.to_account_info(),
+                    authority: ctx.accounts.payer.to_account_info(),
+                }
+            ),
+            amount * 10u64.pow(ctx.accounts.mint_account.decimals as u32)
+        )?;
         Ok(())
     }
 
@@ -310,10 +323,25 @@ pub token_metadata:Program<'info,Metadata>,
 pub token_program:Program<'info,Token>,
 pub system_program:Program<'info,System>,
 pub rent:Sysvar<'info,Rent>
-
-
-
 } 
+#[derive(Accounts, AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct Minttoken<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub recipent: SystemAccount<'info>,
+    #[account(mut)]
+    pub mint_account: Account<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = mint_account,
+        associated_token::authority = recipent
+    )]
+    pub associated_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
 #[account]
 pub struct NewAccount {
     pub data: u32,

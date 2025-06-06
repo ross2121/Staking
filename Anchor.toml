@@ -11,7 +11,7 @@ spl_token_minter = "3of89Z9jwek9zrFgpCWc9jZvQvitpVMxpZNsrAD2vQUD"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
@@ -30,3 +30,4 @@ rpc_port = 8899
 
 [[test.validator.clone]]
 address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+
