@@ -143,7 +143,30 @@ pub mod stake {
                 to: ctx.accounts.vault.to_account_info()
             }
         );
+       
+        // let mint_ctx = Context::new(
+        //     ctx.program_id,
+        //     MintToken {
+        //         mint_account: ctx.accounts.mint_account.clone(),
+        //         associated_token_account: ctx.accounts.associated_token_account.clone(),
+        //         token_program: ctx.accounts.token_program.clone(),
+        //         payer: ctx.accounts.payer.clone(),
+        //     },
+        //     ctx.remaining_accounts,
+        // );
+        // mint_token(mint_ctx, amount)?;
         system_program::transfer(cpi_context, amount * LAMPORTS_PER_SOL)?;
+        mint_to(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    to: ctx.accounts.associated_token_account.to_account_info(),
+                    authority: ctx.accounts.payer.to_account_info(),
+                }
+            ),
+            amount * 10u64.pow(ctx.accounts.mint_account.decimals as u32)
+        )?;
         
         let pda_account = &mut ctx.accounts.pda;
         pda_account.staked_amount = pda_account.staked_amount.checked_add(amount).ok_or(StakeError::Overflow)?;
@@ -249,6 +272,8 @@ pub struct Initialize<'info> {
 pub struct Stake<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
     #[account(
         mut,
         seeds=[b"client1", signer.key().as_ref()],
@@ -256,6 +281,17 @@ pub struct Stake<'info> {
         constraint = pda.owner == signer.key() @ StakeError::Unauthorized
     )]
     pub pda: Account<'info, StakeAccount>,
+    #[account(mut)]
+    pub mint_account: Account<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = mint_account,
+        associated_token::authority = signer
+    )]
+    pub associated_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: This is a PDA that holds the SOL
     #[account(
         mut,
