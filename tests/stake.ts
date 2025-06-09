@@ -184,6 +184,33 @@ const payer=anchor.web3.Keypair.generate();
       points: pdaData.point.toString()
     });
   });
+  it("Mint nft",async()=>{
+    const nftmint=anchor.web3.Keypair.generate();
+    const [metadataAccount] = await anchor.web3.PublicKey.findProgramAddress(
+      [
+        Buffer.from("metadata"),
+        METADATA_PROGRAM_ID.toBuffer(),
+        nftmint.publicKey.toBuffer()
+      ],
+      METADATA_PROGRAM_ID
+    );
+    const metadataProgramInfo = await provider.connection.getAccountInfo(METADATA_PROGRAM_ID);
+    const metadata = {
+      name: "Test Token",
+      symbol: "TEST",
+      uri: "ex"
+    };
+    const transaction=await program.methods.createTokenMint(0,metadata.name,metadata.symbol,metadata.uri).accountsStrict({
+      payer: user.publicKey,
+        metadataAccount: metadataAccount,
+        mintAccount: nftmint.publicKey,
+        tokenMetadata: METADATA_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY
+    }).signers([user,nftmint]).rpc()
+    console.log("tzxjn",transaction);
+  })
 
   it("Unstake SOL", async () => {
     const unstakeAmount = new anchor.BN(1);
