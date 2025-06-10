@@ -1,13 +1,17 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Stake } from "../target/types/stake";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAccount } from "@solana/spl-token";
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import * as bs58 from 'bs58';
 
 describe("stake", () => {
   const METADATA_PROGRAM_ID = new anchor.web3.PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
   const provider = anchor.AnchorProvider.env();
+
+  // const user = anchor.web3.Keypair.fromSecretKey(
+  //   bs58.decode(privateKeyBase58)
+  // );
   anchor.setProvider(provider);
   const program = anchor.workspace.stake as Program<Stake>;
   const user = anchor.web3.Keypair.generate();
@@ -18,21 +22,21 @@ const payer=anchor.web3.Keypair.generate();
   let stakePda: anchor.web3.PublicKey;
   let vaultPda: anchor.web3.PublicKey;
   before(async () => {
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(
-        mintkeypair.publicKey,
-        10 * anchor.web3.LAMPORTS_PER_SOL
-      )
-    );
+    // await provider.connection.confirmTransaction(
+    //   await provider.connection.requestAirdrop(
+    //     mintkeypair.publicKey,
+    //     10 * anchor.web3.LAMPORTS_PER_SOL
+    //   )
+    // );
     console.log("sada",payer.publicKey.toBase58());
    console.log(user.secretKey);
    console.log(user.publicKey);
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(
-        payer.publicKey,
-        1 * anchor.web3.LAMPORTS_PER_SOL
-      )
-    );
+    // await provider.connection.confirmTransaction(
+    //   await provider.connection.requestAirdrop(
+    //     payer.publicKey,
+    //     1 * anchor.web3.LAMPORTS_PER_SOL
+    //   )
+    // );
 
     [stakePda] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("client1"), payer.publicKey.toBuffer()],
@@ -70,7 +74,72 @@ const payer=anchor.web3.Keypair.generate();
       lastUpdateAmount: pdaData.lastUpdateAmount.toString()
     });
   });
-
+  it("create NFT", async () => {
+    const metadata = {
+      name: "Test Token",
+      symbol: "TEST",
+      uri: "https://example.com/nft.json"
+    };
+  
+    // Generate mint keypair
+    // const mintKeypair = anchor.web3.Keypair.generate();
+    
+    // Get associated token account address
+    const associatedTokenAccount = getAssociatedTokenAddressSync(
+      mintkeypair.publicKey,
+      user.publicKey
+    );
+  
+    // Calculate PDA for metadata account
+    const [metadataAccount] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("metadata"),
+        METADATA_PROGRAM_ID.toBuffer(),
+        mintkeypair.publicKey.toBuffer()
+      ],
+      METADATA_PROGRAM_ID
+    );
+  
+    // Calculate PDA for edition account
+    const [editionAccount] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("metadata"),
+        METADATA_PROGRAM_ID.toBuffer(),
+        mintkeypair.publicKey.toBuffer(),
+        Buffer.from("edition")
+      ],
+       METADATA_PROGRAM_ID
+    );
+  
+    try {
+      const tx = await program.methods.mintNft(
+        metadata.name,
+        metadata.symbol,
+        metadata.uri
+      ).accountsStrict({
+        signer: user.publicKey,
+        mintAccount: mintkeypair.publicKey,
+        metadataAccount: metadataAccount,
+        editionAccount: editionAccount,
+        associatedTokenAccount: associatedTokenAccount,
+        tokenMetadataProgram: METADATA_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID
+      }).signers([user,mintkeypair]).rpc();
+  
+      console.log("NFT created successfully:", tx);
+      
+      // Verify the NFT was created
+      
+      // expect(Number(mintedToken.amount)).to.equal(1);
+  
+    } catch (error) {
+      console.error("Error creating NFT:", error);
+      throw error;
+    }
+  });
   it("Create token mint", async () => {
     const metadataProgramInfo = await provider.connection.getAccountInfo(METADATA_PROGRAM_ID);
     if (!metadataProgramInfo?.executable) {

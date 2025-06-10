@@ -4,6 +4,7 @@ use anchor_spl::{associated_token::AssociatedToken, token::{MintTo, TokenAccount
 use {
     anchor_lang::prelude::*,
     anchor_spl::{
+         
         metadata::{
             create_metadata_accounts_v3, mpl_token_metadata::types::DataV2,
             CreateMetadataAccountsV3,Metadata
@@ -35,7 +36,7 @@ pub mod stake {
  
 
     use anchor_lang::solana_program::{ clock, native_token::LAMPORTS_PER_SOL};
-    use anchor_spl::token::{self, Burn};
+    use anchor_spl::{metadata::{create_master_edition_v3, CreateMasterEditionV3}, token::{self, Burn}};
 
     use super::*;
 
@@ -56,6 +57,74 @@ pub mod stake {
         // );
         // system_program::transfer(cpi_context, 1 * LAMPORTS_PER_SOL)?;
         msg!("Greetings from: {:?}", ctx.program_id);
+        Ok(())
+    }
+    pub fn mint_nft(
+        ctx: Context<CreateNft>,
+        nft_name: String,
+        nft_symbol: String,
+        nft_url: String,
+    ) -> Result<()> {
+        // 1. First create metadata
+        create_metadata_accounts_v3(
+            CpiContext::new(
+                ctx.accounts.token_metadata_program.to_account_info(),
+                CreateMetadataAccountsV3 {
+                    metadata: ctx.accounts.metadata_account.to_account_info(),
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    mint_authority: ctx.accounts.signer.to_account_info(),
+                    update_authority: ctx.accounts.signer.to_account_info(),
+                    payer: ctx.accounts.signer.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+            ),
+            DataV2 {
+                name: nft_name,
+                symbol: nft_symbol,
+                uri: nft_url,
+                seller_fee_basis_points: 0,
+                creators: None,
+                collection: None,
+                uses: None,
+            },
+            false,  // is_mutable
+            true,   // update_authority_is_signer
+            None,   // collection details
+        )?;
+
+        // 2. Mint exactly one token
+        mint_to(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    to: ctx.accounts.associated_token_account.to_account_info(),
+                    authority: ctx.accounts.signer.to_account_info(),
+                },
+            ),
+            1, // amount - exactly one token for NFT
+        )?;
+    
+        // 3. Then create master edition
+        create_master_edition_v3(
+            CpiContext::new(
+                ctx.accounts.token_metadata_program.to_account_info(),
+                CreateMasterEditionV3 {
+                    edition: ctx.accounts.edition_account.to_account_info(),
+                    mint: ctx.accounts.mint_account.to_account_info(),
+                    update_authority: ctx.accounts.signer.to_account_info(),
+                    mint_authority: ctx.accounts.signer.to_account_info(),
+                    payer: ctx.accounts.signer.to_account_info(),
+                    metadata: ctx.accounts.metadata_account.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+            ),
+            None, // max_supply (None for unlimited)
+        )?;
+    
         Ok(())
     }
     pub fn create_token_mint(
@@ -280,7 +349,47 @@ pub struct Initialize<'info> {
     pub vault: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
-
+#[derive(Accounts)]
+pub struct CreateNft<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    /// CHECK: This is the Metaplex metadata account which is validated by PDA derivation
+    #[account(
+        mut,
+        seeds = [b"metadata", token_metadata_program.key().as_ref(), mint_account.key().as_ref()],
+        bump,
+        seeds::program = token_metadata_program.key()
+    )]
+    pub metadata_account: UncheckedAccount<'info>,
+    /// CHECK: This is the Metaplex edition account which is validated by PDA derivation
+    #[account(
+        mut,
+        seeds = [b"metadata", token_metadata_program.key().as_ref(), mint_account.key().as_ref(), b"edition"],
+        bump,
+        seeds::program = token_metadata_program.key()
+    )]
+    pub edition_account: UncheckedAccount<'info>,
+    #[account(
+        init,
+        payer = signer,
+        mint::decimals = 0,
+        mint::authority = signer.key(),
+        mint::freeze_authority = signer.key()
+    )]
+    pub mint_account: Account<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = signer,
+        associated_token::mint = mint_account,
+        associated_token::authority = signer
+    )]
+    pub associated_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub token_metadata_program: Program<'info, Metadata>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
 #[derive(Accounts)]
 pub struct Stake<'info> {
     #[account(mut)]
@@ -376,7 +485,6 @@ pub struct GetPoints<'info>{
 pub struct CreateToken<'info>{
 #[account(mut)]
 pub payer:Signer<'info>,
-
     /// CHECK: Validate address by deriving pda
 #[account(mut,seeds=[b"metadata",token_metadata.key().as_ref(),mint_account.key().as_ref()],bump,seeds::program=token_metadata.key())]
 pub metadata_account:UncheckedAccount<'info>,
@@ -387,6 +495,7 @@ pub token_program:Program<'info,Token>,
 pub system_program:Program<'info,System>,
 pub rent:Sysvar<'info,Rent>
 } 
+
 #[derive(Accounts, AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct Minttoken<'info> {
     #[account(mut)]
