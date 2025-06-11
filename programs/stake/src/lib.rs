@@ -65,7 +65,6 @@ pub mod stake {
         nft_symbol: String,
         nft_url: String,
     ) -> Result<()> {
-        // 1. First create metadata
         create_metadata_accounts_v3(
             CpiContext::new(
                 ctx.accounts.token_metadata_program.to_account_info(),
@@ -88,12 +87,10 @@ pub mod stake {
                 collection: None,
                 uses: None,
             },
-            false,  // is_mutable
-            true,   // update_authority_is_signer
-            None,   // collection details
+            true,  
+            true,   
+            None,   
         )?;
-
-        // 2. Mint exactly one token
         mint_to(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -103,10 +100,8 @@ pub mod stake {
                     authority: ctx.accounts.signer.to_account_info(),
                 },
             ),
-            1, // amount - exactly one token for NFT
+            1, 
         )?;
-    
-        // 3. Then create master edition
         create_master_edition_v3(
             CpiContext::new(
                 ctx.accounts.token_metadata_program.to_account_info(),
@@ -122,7 +117,7 @@ pub mod stake {
                     rent: ctx.accounts.rent.to_account_info(),
                 },
             ),
-            None, // max_supply (None for unlimited)
+            None, 
         )?;
     
         Ok(())
@@ -322,12 +317,6 @@ pub struct  Createmint{
  pub symbol:String
 }
 
-pub struct aultAccount {
-   
-    pub staked_amount: u64,
- 
-}
-
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(mut)]
@@ -389,6 +378,11 @@ pub struct CreateNft<'info> {
     pub token_metadata_program: Program<'info, Metadata>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+#[derive(Accounts)]
+pub struct UpdataeNftPoints<'info>{
+    #[account(mut)]
+    pub signer:Signer<'info>
 }
 #[derive(Accounts)]
 pub struct Stake<'info> {
@@ -496,7 +490,7 @@ pub system_program:Program<'info,System>,
 pub rent:Sysvar<'info,Rent>
 } 
 
-#[derive(Accounts, AnchorSerialize, AnchorDeserialize, Clone)]
+#[derive(Accounts)]
 pub struct Minttoken<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -514,10 +508,35 @@ pub struct Minttoken<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
+
+
+#[account] 
+pub struct Nftpoint {
+    pub publickey: Pubkey,
+    pub points: u32,
+    pub last_updated: i64,
+    pub bump: u8 
+}
+
+#[derive(Accounts)]
+pub struct Nftpoints<'info> {
+    pub signer: Signer<'info>,
+    pub mint_account: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [b"mint", mint_account.key().as_ref()],
+        bump
+    )]
+    pub point: Account<'info, Nftpoint>, 
+    pub system_program: Program<'info, System>
+}
+
+
 #[account]
 pub struct NewAccount {
     pub data: u32,
 }
+
 // pub struct Amount{
 
 // }

@@ -8,13 +8,13 @@ import * as bs58 from 'bs58';
 describe("stake", () => {
   const METADATA_PROGRAM_ID = new anchor.web3.PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
   const provider = anchor.AnchorProvider.env();
-
-  // const user = anchor.web3.Keypair.fromSecretKey(
-  //   bs58.decode(privateKeyBase58)
-  // );
+ const privatekey="33YLSRPPbPu3EuzPxHd6bpHT7xzho39mcsVo1ctw1Vdwj9MFnBBRSBveFAKeaxdcxCTeUcbVig2n5ShqxFzAhpGe";
+  const user = anchor.web3.Keypair.fromSecretKey(
+    bs58.decode(privatekey)
+  );
   anchor.setProvider(provider);
   const program = anchor.workspace.stake as Program<Stake>;
-  const user = anchor.web3.Keypair.generate();
+  // const user = anchor.web3.Keypair.generate();
 const payer=anchor.web3.Keypair.generate();
   const mintkeypair = anchor.web3.Keypair.generate();
 
@@ -76,36 +76,28 @@ const payer=anchor.web3.Keypair.generate();
   });
   it("create NFT", async () => {
     const metadata = {
-      name: "Test Token",
-      symbol: "TEST",
-      uri: "https://example.com/nft.json"
+      name: "Mint",
+      symbol: "",
+      uri:"https://devnet.irys.xyz/BNqgXCViZHFjL3Wxf1QS96UTeJCjTWT9jBeKEsS711LH"
     };
-  
-    // Generate mint keypair
-    // const mintKeypair = anchor.web3.Keypair.generate();
-    
-    // Get associated token account address
     const associatedTokenAccount = getAssociatedTokenAddressSync(
       mintkeypair.publicKey,
       user.publicKey
     );
-  
-    // Calculate PDA for metadata account
     const [metadataAccount] = anchor.web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from("metadata"),
         METADATA_PROGRAM_ID.toBuffer(),
-        mintkeypair.publicKey.toBuffer()
+        user.publicKey.toBuffer()
       ],
       METADATA_PROGRAM_ID
     );
-  
-    // Calculate PDA for edition account
+
     const [editionAccount] = anchor.web3.PublicKey.findProgramAddressSync(
       [
         Buffer.from("metadata"),
         METADATA_PROGRAM_ID.toBuffer(),
-        mintkeypair.publicKey.toBuffer(),
+        user.publicKey.toBuffer(),
         Buffer.from("edition")
       ],
        METADATA_PROGRAM_ID
@@ -118,7 +110,7 @@ const payer=anchor.web3.Keypair.generate();
         metadata.uri
       ).accountsStrict({
         signer: user.publicKey,
-        mintAccount: mintkeypair.publicKey,
+        mintAccount: user.publicKey,
         metadataAccount: metadataAccount,
         editionAccount: editionAccount,
         associatedTokenAccount: associatedTokenAccount,
@@ -127,7 +119,7 @@ const payer=anchor.web3.Keypair.generate();
         systemProgram: anchor.web3.SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID
-      }).signers([user,mintkeypair]).rpc();
+      }).signers([user]).rpc();
   
       console.log("NFT created successfully:", tx);
       
@@ -218,23 +210,27 @@ const payer=anchor.web3.Keypair.generate();
     console.log("Get points transaction:", getPointsTx);
   });
   it("Mint token", async () => {
-
-    const assoicatedaccount=getAssociatedTokenAddressSync(new anchor.web3.PublicKey("AuzCK8jdZQ9Dvud9DnFbZ8KuUeuhqZJ2BDoAwzGEmEWd"),user.publicKey)
+    const assoicatedaccount=getAssociatedTokenAddressSync(new anchor.web3.PublicKey("FCj3EhebxZuV4cyTfLj1SjrdpHqpC1HV5CFt4rMdZyCq"),user.publicKey)
+    
+    console.log("payer",payer.publicKey.toBase58());
+    console.log("dasd",payer.secretKey.toString());
     const getPointsTx = await program.methods
-      .mintToken(new anchor.BN(39))
+      .mintToken(new anchor.BN(3))
       .accountsStrict({
         payer:user.publicKey,
-        recipent:user.publicKey,
+        recipent:payer.publicKey,
         associatedTokenAccount:assoicatedaccount,
-        mintAccount:new anchor.web3.PublicKey("AuzCK8jdZQ9Dvud9DnFbZ8KuUeuhqZJ2BDoAwzGEmEWd"),
+        mintAccount:new anchor.web3.PublicKey("FCj3EhebxZuV4cyTfLj1SjrdpHqpC1HV5CFt4rMdZyCq"),
          associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID,
          tokenProgram:TOKEN_PROGRAM_ID,
          systemProgram:anchor.web3.SystemProgram.programId
       })
-      .signers([user])
+      .signers([user,payer])
       .rpc();
 
     console.log("Get points transaction:", getPointsTx);
+    console.log("payer",payer.publicKey);
+    console.log("dasd",payer.secretKey.toString());
   });
 
   it("Claim points", async () => {
